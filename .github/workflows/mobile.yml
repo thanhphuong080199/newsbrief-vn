@@ -1,0 +1,52 @@
+name: Mobile — EAS Update (OTA)
+
+# Type-checks the app and publishes an over-the-air JS/asset update to the
+# "main" EAS Update branch on every push to main. This is FREE (no EAS build
+# credits — Update is metered by monthly active users, not builds) and covers
+# all JS-only changes. Native changes / first install need an APK: see the
+# separate "Mobile — Build APK (manual)" workflow. Details in CI.md.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch: # allow manual runs from the Actions tab
+
+concurrency:
+  group: mobile-eas-update
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: mobile
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Publish EAS Update
+        # COMMIT_MSG via env (not inline) to avoid shell injection from
+        # arbitrary commit messages.
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: eas update --branch main --message "$COMMIT_MSG" --non-interactive

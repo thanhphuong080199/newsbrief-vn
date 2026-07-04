@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "newsbrief",
+    "slug": "mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#b91c1c",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#b91c1c"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8f806cea-4a9b-4477-8a01-4ca0c65d1cb2"
+      }
+    },
+    "owner": "thanhphuong080199",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8f806cea-4a9b-4477-8a01-4ca0c65d1cb2"
+    }
+  }
+}
