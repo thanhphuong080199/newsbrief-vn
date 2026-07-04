@@ -7,9 +7,11 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.newsbriefvn.app"
     },
     "android": {
+      "package": "com.newsbriefvn.app",
       "adaptiveIcon": {
         "backgroundColor": "#b91c1c",
         "foregroundImage": "./assets/android-icon-foreground.png",
