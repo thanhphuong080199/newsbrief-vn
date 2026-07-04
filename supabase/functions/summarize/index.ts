@@ -1,6 +1,6 @@
 // summarize: process pending summaries in small batches with the Gemini
 // fallback chain. Rows that fail transiently (429/503 on all models) stay
-// `pending`, so the next 15-minute cron run is automatically the retry pass.
+// `pending`, so the next 5-minute cron run is automatically the retry pass.
 
 import { db } from "../_shared/db.ts";
 import { loadConfig } from "../_shared/config.ts";
@@ -50,7 +50,10 @@ Deno.serve(async (_req) => {
       .select("id, group_id, attempts")
       .eq("status", "pending")
       .lt("attempts", cfg.summarizeMaxAttempts)
-      .order("created_at", { ascending: true })
+      // Newest-first: the feed shows newest groups on top, so summarize those
+      // first — otherwise the visible top-of-feed is always still "pending"
+      // while the job works through older groups nobody is looking at.
+      .order("created_at", { ascending: false })
       .limit(cfg.summarizeBatchSize);
     if (error) throw new Error(`load pending: ${error.message}`);
 
