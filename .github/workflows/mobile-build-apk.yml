@@ -1,0 +1,47 @@
+name: Mobile — Build APK (manual)
+
+# On-demand shareable Android APK. Runs ONLY when you click "Run workflow" in
+# the Actions tab — never automatically — because each build consumes an EAS
+# build credit (free-tier monthly cap). Use it for native changes (new native
+# module, SDK bump, app.json native config) or to hand a fresh APK to a new
+# tester. Day-to-day JS changes go out free via "Mobile — EAS Update (OTA)".
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-build-apk
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: mobile
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build shareable APK on EAS
+        # preview profile = buildType apk + internal distribution → QR install
+        # page. --no-wait queues the build and exits; the download/install link
+        # is in the EAS dashboard + emailed. Drop --no-wait to make this job
+        # wait for the build and fail on a broken one.
+        run: eas build --platform android --profile preview --non-interactive --no-wait

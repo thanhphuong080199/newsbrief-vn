@@ -1,0 +1,13 @@
+{
+  "name": "newsbrief-vn",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal Vietnamese news aggregator (research project)",
+  "scripts": {
+    "db:push": "supabase db push",
+    "functions:deploy": "supabase functions deploy"
+  },
+  "devDependencies": {
+    "supabase": "^2.0.0"
+  }
+}

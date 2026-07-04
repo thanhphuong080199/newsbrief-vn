@@ -1,0 +1,43 @@
+name: Supabase — Deploy
+
+# Applies DB migrations and deploys the Edge Functions to the hosted project
+# whenever backend code lands on main. See CI.md for the required secrets.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - ".github/workflows/supabase.yml"
+  workflow_dispatch: # allow manual runs from the Actions tab
+
+# Never run two deploys against the same project at once.
+concurrency:
+  group: supabase-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: Push database migrations
+        # Applies supabase/migrations/*.sql to the hosted DB.
+        # The pgdelta cert warning seen locally is cosmetic; exit code is 0.
+        run: supabase db push
+
+      - name: Deploy Edge Functions
+        # --use-api bundles server-side, so the runner needs no Docker
+        # (and avoids the ECR/CloudFront image-pull flakiness seen locally).
+        run: supabase functions deploy ingest summarize --use-api

@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Supabase local dev
+supabase/.temp/
+supabase/.branches/
+
+# Expo (later)
+.expo/
+dist/
