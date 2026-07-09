@@ -7,6 +7,7 @@ import {
   Platform,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -15,7 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
-import { FeedGroup, groupSummary } from "../lib/types";
+import { CATEGORIES, FeedGroup, groupCategory, groupSummary } from "../lib/types";
 
 function timeAgo(iso: string): string {
   const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
@@ -45,19 +46,26 @@ export default function FeedScreen({ userId }: { userId: string }) {
   const [saving, setSaving] = useState(false);
   // the group whose full-detail screen is open (null = feed list)
   const [detailId, setDetailId] = useState<string | null>(null);
+  // selected category filter (null = "Tất cả" / show all)
+  const [category, setCategory] = useState<string | null>(null);
+  // feed ordering: newest-first (default) or by outlet coverage (trending)
+  const [sort, setSort] = useState<"recent" | "trending">("recent");
+  // group_ids the user has already opened (dimmed in the feed)
+  const [reads, setReads] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setError(null);
-    const [groupsRes, pinsRes, subsRes] = await Promise.all([
+    const [groupsRes, pinsRes, subsRes, readsRes] = await Promise.all([
       supabase
         .from("article_groups")
         .select(
-          "id, title, first_seen_at, article_count, summaries(summary_vi, status), articles(id, title, url, source_id, published_at, sources(name))",
+          "id, title, first_seen_at, article_count, summaries(summary_vi, status, category), articles(id, title, url, source_id, published_at, sources(name))",
         )
         .order("first_seen_at", { ascending: false })
         .limit(100),
       supabase.from("pins").select("group_id, note").eq("user_id", userId),
       supabase.from("user_sources").select("source_id").eq("user_id", userId),
+      supabase.from("reads").select("group_id").eq("user_id", userId),
     ]);
     if (groupsRes.error) {
       setError(groupsRes.error.message);
@@ -66,7 +74,20 @@ export default function FeedScreen({ userId }: { userId: string }) {
     setGroups((groupsRes.data ?? []) as unknown as FeedGroup[]);
     setPins(new Map((pinsRes.data ?? []).map((p) => [p.group_id, p.note ?? ""])));
     setSubscribed(new Set((subsRes.data ?? []).map((s) => s.source_id)));
+    setReads(new Set((readsRes.data ?? []).map((r) => r.group_id)));
   }, [userId]);
+
+  // Open a story's detail and mark it read (optimistic; read state is
+  // non-critical so a failed upsert is left un-reverted).
+  function openDetail(id: string) {
+    setDetailId(id);
+    if (reads.has(id)) return;
+    setReads((prev) => new Set(prev).add(id));
+    supabase
+      .from("reads")
+      .upsert({ user_id: userId, group_id: id }, { onConflict: "user_id,group_id" })
+      .then(({ error: e }) => e && console.warn("mark read failed:", e.message));
+  }
 
   useEffect(() => {
     load();
@@ -126,10 +147,30 @@ export default function FeedScreen({ userId }: { userId: string }) {
 
   // No subscriptions yet = show everything; otherwise only groups with at
   // least one article from a subscribed source (filtering is client-side by design).
-  const visible =
+  const subFiltered =
     !subscribed || subscribed.size === 0
       ? groups
       : groups.filter((g) => g.articles.some((a) => subscribed.has(a.source_id)));
+
+  // Only show chips for categories actually present in the current feed, in the
+  // fixed taxonomy order. Then narrow the list by the selected category (if any).
+  const presentCategories = CATEGORIES.filter((c) =>
+    subFiltered.some((g) => groupCategory(g) === c),
+  );
+  const filtered = category
+    ? subFiltered.filter((g) => groupCategory(g) === category)
+    : subFiltered;
+
+  // "Nổi bật" ranks by how many outlets cover the story, then recency.
+  // "Mới nhất" keeps the query's newest-first order (no client sort needed).
+  const visible =
+    sort === "trending"
+      ? [...filtered].sort(
+          (a, b) =>
+            b.article_count - a.article_count ||
+            Date.parse(b.first_seen_at) - Date.parse(a.first_seen_at),
+        )
+      : filtered;
 
   // Resolve the open detail from the live list so it reflects refreshes/pin edits.
   const detail = detailId ? groups.find((g) => g.id === detailId) ?? null : null;
@@ -137,6 +178,46 @@ export default function FeedScreen({ userId }: { userId: string }) {
   return (
     <View style={styles.container}>
       {error && <Text style={styles.error}>{error}</Text>}
+      <View style={styles.filterBar}>
+        <View style={styles.sortRow}>
+          {(["recent", "trending"] as const).map((s) => {
+            const active = sort === s;
+            return (
+              <TouchableOpacity
+                key={s}
+                style={[styles.sortBtn, active && styles.sortBtnActive]}
+                onPress={() => setSort(s)}
+              >
+                <Text style={[styles.sortText, active && styles.sortTextActive]}>
+                  {s === "recent" ? "Mới nhất" : "Nổi bật"}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        {presentCategories.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipsRow}
+          >
+            {[null, ...presentCategories].map((c) => {
+              const active = category === c;
+              return (
+                <TouchableOpacity
+                  key={c ?? "all"}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setCategory(c)}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {c ?? "Tất cả"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+      </View>
       <FlatList
         data={visible}
         keyExtractor={(g) => g.id}
@@ -147,17 +228,20 @@ export default function FeedScreen({ userId }: { userId: string }) {
         renderItem={({ item }) => {
           const summary = groupSummary(item);
           const note = pins.get(item.id);
+          const cat = groupCategory(item);
+          const read = reads.has(item.id);
           return (
             <View style={styles.card}>
+              {cat ? <Text style={styles.badge}>{cat}</Text> : null}
               <View style={styles.cardHeader}>
-                <TouchableOpacity style={styles.headerText} onPress={() => setDetailId(item.id)}>
-                  <Text style={styles.title}>{item.title}</Text>
+                <TouchableOpacity style={styles.headerText} onPress={() => openDetail(item.id)}>
+                  <Text style={[styles.title, read && styles.titleRead]}>{item.title}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => openEditor(item)} hitSlop={10}>
                   <Text style={styles.pin}>{pins.has(item.id) ? "★" : "☆"}</Text>
                 </TouchableOpacity>
               </View>
-              <TouchableOpacity activeOpacity={0.6} onPress={() => setDetailId(item.id)}>
+              <TouchableOpacity activeOpacity={0.6} onPress={() => openDetail(item.id)}>
                 {summary?.summary_vi ? (
                   <Text style={styles.summary} numberOfLines={PREVIEW_LINES}>
                     {summary.summary_vi}
@@ -250,6 +334,20 @@ function DetailModal({
   onPin: () => void;
 }) {
   const summary = groupSummary(group);
+  const cat = groupCategory(group);
+
+  async function onShare() {
+    const body = summary?.summary_vi ?? "";
+    const links = group.articles
+      .map((a) => `• ${a.sources?.name ?? "nguồn"}: ${a.url}`)
+      .join("\n");
+    try {
+      await Share.share({ message: `${group.title}\n\n${body}\n\n${links}`.trim() });
+    } catch {
+      // user dismissed the share sheet — nothing to do
+    }
+  }
+
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.detailSafe} edges={["top", "bottom"]}>
@@ -257,11 +355,17 @@ function DetailModal({
           <TouchableOpacity onPress={onClose} hitSlop={10}>
             <Text style={styles.detailClose}>‹ Quay lại</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={onPin} hitSlop={10}>
-            <Text style={styles.pin}>{pinned ? "★" : "☆"}</Text>
-          </TouchableOpacity>
+          <View style={styles.detailBarRight}>
+            <TouchableOpacity onPress={onShare} hitSlop={10}>
+              <Text style={styles.detailShare}>Chia sẻ</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onPin} hitSlop={10}>
+              <Text style={styles.pin}>{pinned ? "★" : "☆"}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <ScrollView contentContainerStyle={styles.detailBody}>
+          {cat ? <Text style={styles.badge}>{cat}</Text> : null}
           <Text style={styles.detailTitle}>{group.title}</Text>
           <Text style={styles.detailTime}>{timeAgo(group.first_seen_at)}</Text>
           {note ? <Text style={styles.note}>📝 {note}</Text> : null}
@@ -290,6 +394,46 @@ function DetailModal({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f4f4f5" },
+  filterBar: {
+    backgroundColor: "#fff",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e5e5e5",
+  },
+  sortRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  sortBtn: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
+  sortBtnActive: { backgroundColor: "#fee2e2" },
+  sortText: { fontSize: 13, fontWeight: "600", color: "#888" },
+  sortTextActive: { color: "#b91c1c" },
+  chipsRow: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "#f4f4f5",
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+  },
+  chipActive: { backgroundColor: "#b91c1c", borderColor: "#b91c1c" },
+  chipText: { fontSize: 13.5, fontWeight: "600", color: "#444" },
+  chipTextActive: { color: "#fff" },
+  badge: {
+    alignSelf: "flex-start",
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#b91c1c",
+    backgroundColor: "#fee2e2",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginBottom: 8,
+    overflow: "hidden",
+  },
   card: {
     backgroundColor: "#fff",
     marginHorizontal: 12,
@@ -300,6 +444,7 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   headerText: { flex: 1 },
   title: { fontSize: 16, fontWeight: "700", lineHeight: 22 },
+  titleRead: { color: "#9ca3af" },
   pin: { fontSize: 22, color: "#b91c1c" },
   summary: { marginTop: 8, fontSize: 14.5, lineHeight: 21, color: "#333" },
   pendingSummary: { marginTop: 8, fontStyle: "italic", color: "#999" },
@@ -362,6 +507,8 @@ const styles = StyleSheet.create({
     borderBottomColor: "#ddd",
   },
   detailClose: { color: "#b91c1c", fontSize: 16, fontWeight: "600" },
+  detailBarRight: { flexDirection: "row", alignItems: "center", gap: 18 },
+  detailShare: { color: "#b91c1c", fontSize: 15, fontWeight: "600" },
   detailBody: { padding: 16, paddingBottom: 40 },
   detailTitle: { fontSize: 21, fontWeight: "800", lineHeight: 28 },
   detailTime: { color: "#999", fontSize: 13, marginTop: 6 },

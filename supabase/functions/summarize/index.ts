@@ -11,6 +11,33 @@ const MAX_ARTICLES_PER_GROUP = 5;
 const MAX_CHARS_PER_ARTICLE = 6000;
 const MAX_CHARS_TOTAL = 15000;
 
+// Fixed VN taxonomy. Keep in sync with mobile/lib/types.ts CATEGORIES.
+const CATEGORIES = [
+  "Thời sự", "Thế giới", "Kinh tế", "Thể thao", "Công nghệ",
+  "Giải trí", "Sức khỏe", "Giáo dục", "Pháp luật", "Khác",
+] as const;
+
+// Diacritic-insensitive, punctuation-stripped key so the model's answer matches
+// a canonical category even if it adds accents-loss or a trailing period.
+const catKey = (s: string) =>
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/[^\p{L}\s]/gu, " ").replace(/\s+/g, " ").trim();
+const CATEGORY_BY_KEY = new Map(CATEGORIES.map((c) => [catKey(c), c]));
+
+// Parse the labeled model output into a canonical category + the summary body.
+// Resilient: if the format isn't followed, category is null and the summary
+// falls back to the whole response so we never drop a good summary.
+function parseSummary(raw: string): { category: string | null; summary: string } {
+  const catMatch = raw.match(/PHÂN\s*LOẠI\s*[:：]\s*(.+)/i);
+  const category = catMatch ? (CATEGORY_BY_KEY.get(catKey(catMatch[1])) ?? null) : null;
+  const sumMatch = raw.match(/TÓM\s*TẮT\s*[:：]\s*([\s\S]+)/i);
+  let summary = sumMatch
+    ? sumMatch[1].trim()
+    : raw.replace(/PHÂN\s*LOẠI\s*[:：].*(\r?\n)?/i, "").trim();
+  if (!summary) summary = raw.trim();
+  return { category, summary };
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface GroupArticle {
@@ -30,7 +57,13 @@ function buildPrompt(articles: GroupArticle[]): string {
 
 ${body}
 
-Hãy viết MỘT bản tóm tắt duy nhất bằng TIẾNG VIỆT (3–5 câu, văn phong khách quan, nêu đủ ý chính: ai, cái gì, khi nào, ở đâu, vì sao/tác động). Nếu bài gốc bằng tiếng nước ngoài, hãy dịch nội dung sang tiếng Việt khi tóm tắt. Chỉ trả về nội dung tóm tắt — không thêm lời dẫn, tiêu đề hay định dạng markdown.`;
+Hãy thực hiện hai việc:
+1) Phân loại sự kiện vào ĐÚNG MỘT chủ đề trong danh sách sau (chép lại chính xác một chủ đề): ${CATEGORIES.join(", ")}.
+2) Viết MỘT bản tóm tắt duy nhất bằng TIẾNG VIỆT (3–5 câu, văn phong khách quan, nêu đủ ý chính: ai, cái gì, khi nào, ở đâu, vì sao/tác động). Nếu bài gốc bằng tiếng nước ngoài, hãy dịch nội dung sang tiếng Việt khi tóm tắt.
+
+Trả về CHÍNH XÁC theo định dạng sau, không thêm lời dẫn hay định dạng markdown:
+PHÂN LOẠI: <một chủ đề trong danh sách>
+TÓM TẮT: <nội dung tóm tắt>`;
 }
 
 Deno.serve(async (_req) => {
@@ -85,8 +118,10 @@ Deno.serve(async (_req) => {
           cfg.modelFallbackOrder,
           skipModels,
         );
+        const { category, summary } = parseSummary(text);
         await db.from("summaries").update({
-          summary_vi: text,
+          summary_vi: summary,
+          category,
           model,
           status: "success",
           attempts: row.attempts + 1,
