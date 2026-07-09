@@ -1,7 +1,7 @@
 # SPEC — newsbrief-vn
 
 > Source of truth for what we're building. Keep updated as the design evolves.
-> Last updated: 2026-07-03 (backend implemented + tested locally; mobile app built, first device run pending — see PROGRESS.md)
+> Last updated: 2026-07-09 (v1 shipped + deployed; added §7 feature backlog to build one at a time — see PROGRESS.md)
 
 ## 1. Product Overview
 
@@ -187,11 +187,38 @@ Articles and summaries cascade. Runs directly in pg_cron.
 | Cron schedules | pg_cron jobs (migration) | ingest hourly, summarize */15, cleanup daily |
 | `GEMINI_API_KEY` | Supabase Edge Function secrets | — |
 
-## 7. Out of Scope (unless decided otherwise later)
+## 7. Planned features / backlog (v1.0 done; these are next)
+
+The v1 SPEC (§1–§6) is fully implemented. These are candidate enhancements, ordered by value-for-effort. **We build them one at a time** — pick the next `[ ]` item, spec the details, implement, then check it off. Mark `[x]` when shipped.
+
+### Cheap wins (reuse existing data model / LLM call — no extra Gemini quota)
+
+- [x] **1. Category / topic tagging + feed filter** *(shipped 2026-07-09)*
+  - `summarize` emits a `category` in the **same** Gemini call (no extra API cost), constrained to a fixed VN taxonomy: Thời sự, Thế giới, Kinh tế, Thể thao, Công nghệ, Giải trí, Sức khỏe, Giáo dục, Pháp luật, Khác.
+  - Stored as nullable `summaries.category` (migration `20260709000001`); parsed from a labeled `PHÂN LOẠI:` / `TÓM TẮT:` response — parse is resilient (unknown/absent category → null, summary never dropped).
+  - Feed shows dynamic filter chips (only categories present in the feed) + a category badge on each card and the detail screen. Rows summarized before the change stay null (uncategorized) and drain within retention.
+- [x] **2. "Trending / Nổi bật" sort** *(shipped 2026-07-09)*
+  - Feed sort toggle: "Mới nhất" (query's `first_seen_at desc`) / "Nổi bật" (client-sorts the loaded set by `article_count desc`, then recency). Reuses existing `article_count`; no backend change.
+- [x] **3. Share button** *(shipped 2026-07-09)*
+  - Native share sheet (RN `Share`) on the detail screen — shares title + VN summary + per-source links. Mobile-only, no backend.
+- [x] **4. Read / unread state** *(shipped 2026-07-09)*
+  - `reads (user_id, group_id, read_at)` table (migration `20260709000002`) with RLS `user_id = auth.uid()`, cascades on user+group delete. Client optimistically upserts on detail-open; read stories show a greyed title in the feed.
+
+### Bigger bets (still free-tier-friendly)
+
+- [ ] **5. Vietnamese full-text search**
+  - Postgres `tsvector` over group title + `summary_vi`; search bar in the feed. No LLM cost. VN diacritics/tokenization to be handled in the detailed spec.
+- [ ] **6. Daily digest ("Bản tin sáng")**
+  - One extra Gemini call/day summarizing the top N groups into a single "N điều đáng chú ý hôm nay" card. One digest table/row + one small daily cron + one screen.
+- [ ] **7. Push notifications** *(heaviest lift)*
+  - Expo push tokens stored per anonymous user; a cron/function that notifies when a big new story lands in a followed category. Needs token storage, a delivery function, and on-device testing. Depends on #1 (categories) to be useful.
+
+## 8. Out of Scope (unless decided otherwise later)
 - No login/sign-up/onboarding flow (identity is per-device anonymous auth), no account recovery/link across devices or reinstalls, or multi-tenant isolation of articles (articles/groups/summaries are shared globally; only subscriptions and pins are per-user).
-- No push notifications.
-- No full-text search.
 - No per-user summarization preferences (length, tone).
 - No image/media handling — text only.
 - No analytics, no payments, no commercialization features.
+- No iOS shareable builds (needs a paid Apple account) — Android APK only.
 - Paywall bypassing: paywalled articles are summarized from whatever public content the feed/page exposes; we do not circumvent paywalls.
+
+> Note: full-text search (§7 #5) and push notifications (§7 #7) were originally out of scope in v1; they've been promoted to the backlog for consideration.
