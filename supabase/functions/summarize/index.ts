@@ -24,18 +24,25 @@ const catKey = (s: string) =>
     .replace(/[^\p{L}\s]/gu, " ").replace(/\s+/g, " ").trim();
 const CATEGORY_BY_KEY = new Map(CATEGORIES.map((c) => [catKey(c), c]));
 
-// Parse the labeled model output into a canonical category + the summary body.
-// Resilient: if the format isn't followed, category is null and the summary
-// falls back to the whole response so we never drop a good summary.
-function parseSummary(raw: string): { category: string | null; summary: string } {
+// Parse the labeled model output into a canonical category + a Vietnamese title
+// + the summary body. Resilient: if the format isn't followed, category/title
+// are null and the summary falls back to the whole response (minus the label
+// lines) so we never drop a good summary. A null title_vi means the app shows
+// the original headline.
+function parseSummary(raw: string): { category: string | null; titleVi: string | null; summary: string } {
   const catMatch = raw.match(/PHÂN\s*LOẠI\s*[:：]\s*(.+)/i);
   const category = catMatch ? (CATEGORY_BY_KEY.get(catKey(catMatch[1])) ?? null) : null;
+  const titleMatch = raw.match(/TIÊU\s*ĐỀ\s*[:：]\s*(.+)/i);
+  const titleVi = titleMatch ? (titleMatch[1].trim() || null) : null;
   const sumMatch = raw.match(/TÓM\s*TẮT\s*[:：]\s*([\s\S]+)/i);
   let summary = sumMatch
     ? sumMatch[1].trim()
-    : raw.replace(/PHÂN\s*LOẠI\s*[:：].*(\r?\n)?/i, "").trim();
+    : raw
+        .replace(/PHÂN\s*LOẠI\s*[:：].*(\r?\n)?/i, "")
+        .replace(/TIÊU\s*ĐỀ\s*[:：].*(\r?\n)?/i, "")
+        .trim();
   if (!summary) summary = raw.trim();
-  return { category, summary };
+  return { category, titleVi, summary };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -57,12 +64,14 @@ function buildPrompt(articles: GroupArticle[]): string {
 
 ${body}
 
-Hãy thực hiện hai việc:
+Hãy thực hiện ba việc:
 1) Phân loại sự kiện vào ĐÚNG MỘT chủ đề trong danh sách sau (chép lại chính xác một chủ đề): ${CATEGORIES.join(", ")}.
-2) Viết MỘT bản tóm tắt duy nhất bằng TIẾNG VIỆT (3–5 câu, văn phong khách quan, nêu đủ ý chính: ai, cái gì, khi nào, ở đâu, vì sao/tác động). Nếu bài gốc bằng tiếng nước ngoài, hãy dịch nội dung sang tiếng Việt khi tóm tắt.
+2) Đặt MỘT tiêu đề ngắn gọn bằng TIẾNG VIỆT cho sự kiện. Nếu tiêu đề gốc bằng tiếng nước ngoài, hãy dịch tự nhiên sang tiếng Việt; nếu đã bằng tiếng Việt, giữ nguyên ý (chỉ tinh chỉnh cho gọn nếu cần).
+3) Viết MỘT bản tóm tắt duy nhất bằng TIẾNG VIỆT (3–5 câu, văn phong khách quan, nêu đủ ý chính: ai, cái gì, khi nào, ở đâu, vì sao/tác động). Nếu bài gốc bằng tiếng nước ngoài, hãy dịch nội dung sang tiếng Việt khi tóm tắt.
 
 Trả về CHÍNH XÁC theo định dạng sau, không thêm lời dẫn hay định dạng markdown:
 PHÂN LOẠI: <một chủ đề trong danh sách>
+TIÊU ĐỀ: <tiêu đề tiếng Việt>
 TÓM TẮT: <nội dung tóm tắt>`;
 }
 
@@ -118,9 +127,10 @@ Deno.serve(async (_req) => {
           cfg.modelFallbackOrder,
           skipModels,
         );
-        const { category, summary } = parseSummary(text);
+        const { category, titleVi, summary } = parseSummary(text);
         await db.from("summaries").update({
           summary_vi: summary,
+          title_vi: titleVi,
           category,
           model,
           status: "success",

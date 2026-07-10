@@ -183,7 +183,7 @@ Articles and summaries cascade. Runs directly in pg_cron.
 | `summarize_max_attempts` | `app_config` | 8 |
 | `max_items_per_source` | `app_config` | 20 |
 | `max_page_extractions_per_run` | `app_config` | 8 |
-| `model_fallback_order` | `app_config` | 3.5-flash → 3.1-flash-lite → 2.5-flash-lite |
+| `model_fallback_order` | `app_config` | 3.5-flash → 3-flash-preview → 3.1-flash-lite → 2.5-flash-lite → gemma-4-31b-it → gemma-4-26b-a4b-it |
 | Cron schedules | pg_cron jobs (migration) | ingest hourly, summarize */15, cleanup daily |
 | `GEMINI_API_KEY` | Supabase Edge Function secrets | — |
 
@@ -203,6 +203,8 @@ The v1 SPEC (§1–§6) is fully implemented. These are candidate enhancements, 
   - Native share sheet (RN `Share`) on the detail screen — shares title + VN summary + per-source links. Mobile-only, no backend.
 - [x] **4. Read / unread state** *(shipped 2026-07-09)*
   - `reads (user_id, group_id, read_at)` table (migration `20260709000002`) with RLS `user_id = auth.uid()`, cascades on user+group delete. Client optimistically upserts on detail-open; read stories show a greyed title in the feed.
+- [x] **4b. Vietnamese title translation** *(shipped 2026-07-10)*
+  - `summarize` emits a `TIÊU ĐỀ:` (VN title) in the **same** Gemini call (no extra API cost): foreign headlines are translated to Vietnamese, Vietnamese ones kept as-is. Stored as nullable `summaries.title_vi` (migration `20260710000002`), parsed resiliently (absent → null). Feed/detail/share display `title_vi ?? article_groups.title`; per-source rows keep original headlines. Rows summarized before the change fall back to the original title.
 
 ### Bigger bets (still free-tier-friendly)
 
