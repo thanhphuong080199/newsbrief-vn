@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
-import { CATEGORIES, FeedGroup, groupCategory, groupSummary } from "../lib/types";
+import { CATEGORIES, FeedGroup, groupCategory, groupSummary, groupTitle } from "../lib/types";
 
 function timeAgo(iso: string): string {
   const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
@@ -59,7 +59,7 @@ export default function FeedScreen({ userId }: { userId: string }) {
       supabase
         .from("article_groups")
         .select(
-          "id, title, first_seen_at, article_count, summaries(summary_vi, status, category), articles(id, title, url, source_id, published_at, sources(name))",
+          "id, title, first_seen_at, article_count, summaries(summary_vi, title_vi, status, category), articles(id, title, url, source_id, published_at, sources(name))",
         )
         .order("first_seen_at", { ascending: false })
         .limit(100),
@@ -235,7 +235,7 @@ export default function FeedScreen({ userId }: { userId: string }) {
               {cat ? <Text style={styles.badge}>{cat}</Text> : null}
               <View style={styles.cardHeader}>
                 <TouchableOpacity style={styles.headerText} onPress={() => openDetail(item.id)}>
-                  <Text style={[styles.title, read && styles.titleRead]}>{item.title}</Text>
+                  <Text style={[styles.title, read && styles.titleRead]}>{groupTitle(item)}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => openEditor(item)} hitSlop={10}>
                   <Text style={styles.pin}>{pins.has(item.id) ? "★" : "☆"}</Text>
@@ -342,7 +342,7 @@ function DetailModal({
       .map((a) => `• ${a.sources?.name ?? "nguồn"}: ${a.url}`)
       .join("\n");
     try {
-      await Share.share({ message: `${group.title}\n\n${body}\n\n${links}`.trim() });
+      await Share.share({ message: `${groupTitle(group)}\n\n${body}\n\n${links}`.trim() });
     } catch {
       // user dismissed the share sheet — nothing to do
     }
@@ -366,7 +366,7 @@ function DetailModal({
         </View>
         <ScrollView contentContainerStyle={styles.detailBody}>
           {cat ? <Text style={styles.badge}>{cat}</Text> : null}
-          <Text style={styles.detailTitle}>{group.title}</Text>
+          <Text style={styles.detailTitle}>{groupTitle(group)}</Text>
           <Text style={styles.detailTime}>{timeAgo(group.first_seen_at)}</Text>
           {note ? <Text style={styles.note}>📝 {note}</Text> : null}
           {summary?.summary_vi ? (

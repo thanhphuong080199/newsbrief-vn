@@ -19,7 +19,17 @@ const DEFAULTS: AppConfig = {
   summarizeMaxAttempts: 8,
   maxItemsPerSource: 20,
   maxPageExtractionsPerRun: 8,
-  modelFallbackOrder: ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite"],
+  // Keep in sync with the app_config.model_fallback_order row (migration
+  // 20260710000001). Free-tier quota is per-model, so the chain spans distinct
+  // buckets; Gemma draws from a separate pool. All six were live-tested working.
+  modelFallbackOrder: [
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemma-4-31b-it",
+    "gemma-4-26b-a4b-it",
+  ],
 };
 
 export async function loadConfig(): Promise<AppConfig> {
